@@ -582,7 +582,7 @@ if __name__ == "__main__":
        start_date=start_date,
         end_date=end_date,
         element_criteria=element_criteria,
-        strict=False
+        strict=True
     )
 
     summary = client.get_summary(
