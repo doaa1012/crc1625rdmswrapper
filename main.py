@@ -45,7 +45,6 @@ class ProcessDataRequest(ApiKeyInput):
     end_date: str
     element_criteria: Dict[str, Any]
     strict: Optional[bool] = True
-    include_download: Optional[bool] = True  # allow optional download
     output_filename: Optional[str] = "filtered_data.csv"
 
 @app.post("/execute/")
@@ -74,7 +73,6 @@ def filter_by_elements(req: ElementFilterRequest):
         "data": df.to_dict(orient="records"),
         "filtered_sample_ids": ids
     }
-
 @app.post("/process/")
 def process_data(req: ProcessDataRequest):
     client = MatInfWebApiClient("https://crc1625.mdi.ruhr-uni-bochum.de", req.api_key)
@@ -83,7 +81,7 @@ def process_data(req: ProcessDataRequest):
     os.makedirs(temp_folder, exist_ok=True)
     output_csv = os.path.join(temp_folder, req.output_filename)
 
-    # Process and optionally save
+    # Process data (includes filtering + downloads)
     df = client.process_data(
         associated_typenames=req.associated_typenames,
         sample_typename=req.sample_typename,
@@ -95,16 +93,13 @@ def process_data(req: ProcessDataRequest):
         output_filename=req.output_filename
     )
 
-    # Download files if requested
-    if req.include_download:
-        client.download_associated_files(df, temp_folder)
-
-    # Zip the folder and return as file
+    # Zip the temp folder and return the archive
     zip_path = f"{temp_folder}.zip"
     shutil.make_archive(temp_folder, 'zip', temp_folder)
-    shutil.rmtree(temp_folder)
+    shutil.rmtree(temp_folder)  # cleanup
 
     return FileResponse(zip_path, filename=os.path.basename(zip_path), media_type="application/zip")
+
 
 @app.post("/summary/")
 def get_summary(req: SummaryRequest):
