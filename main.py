@@ -3,10 +3,13 @@ from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 from fastapi.responses import JSONResponse
 from MatInfClient import MatInfWebApiClient
+import os
+import requests
 
 app = FastAPI(title="CRC1625rdmswrapper")
 
-# Base model for API key input
+# ---------- Request Models ----------
+
 class ApiKeyInput(BaseModel):
     api_key: str
 
@@ -42,6 +45,28 @@ class ProcessDataRequest(ApiKeyInput):
     element_criteria: Dict[str, Any]
     strict: Optional[bool] = True
 
+# ---------- Helper to extend the client for file downloading ----------
+
+def download_file(base_url: str, relative_path: str, save_dir: str = "results/downloaded_files") -> Optional[str]:
+    if not relative_path:
+        return None
+    os.makedirs(save_dir, exist_ok=True)
+    file_url = base_url.rstrip("/") + relative_path
+    filename = os.path.basename(relative_path)
+    save_path = os.path.join(save_dir, filename)
+
+    try:
+        response = requests.get(file_url)
+        if response.status_code == 200:
+            with open(save_path, "wb") as f:
+                f.write(response.content)
+            return save_path
+    except Exception as e:
+        print(f"Failed to download {file_url}: {e}")
+    return None
+
+# ---------- Endpoints ----------
+
 @app.post("/execute/")
 def execute_sql(req: SQLRequest):
     client = MatInfWebApiClient("https://crc1625.mdi.ruhr-uni-bochum.de", req.api_key)
@@ -71,7 +96,9 @@ def filter_by_elements(req: ElementFilterRequest):
 
 @app.post("/process/")
 def process_data(req: ProcessDataRequest):
-    client = MatInfWebApiClient("https://crc1625.mdi.ruhr-uni-bochum.de", req.api_key)
+    base_url = "https://crc1625.mdi.ruhr-uni-bochum.de"
+    client = MatInfWebApiClient(base_url, req.api_key)
+    
     df = client.process_data(
         associated_typenames=req.associated_typenames,
         sample_typename=req.sample_typename,
@@ -80,7 +107,16 @@ def process_data(req: ProcessDataRequest):
         element_criteria=req.element_criteria,
         strict=req.strict
     )
-    return {"data": df.to_dict(orient="records")}
+
+    # Download linked files
+    df["local_filepath"] = df["linked_objectfilepath"].apply(
+        lambda path: download_file(base_url, path) if path else None
+    )
+
+    return {
+        "data": df.to_dict(orient="records"),
+        "downloaded_files": df["local_filepath"].dropna().tolist()
+    }
 
 @app.post("/summary/")
 def get_summary(req: SummaryRequest):
