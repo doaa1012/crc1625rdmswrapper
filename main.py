@@ -1,15 +1,16 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from MatInfClient import MatInfWebApiClient
 import os
-import requests
+import shutil
+import zipfile
+import uuid
 
 app = FastAPI(title="CRC1625rdmswrapper")
 
-# ---------- Request Models ----------
-
+# Models
 class ApiKeyInput(BaseModel):
     api_key: str
 
@@ -44,28 +45,8 @@ class ProcessDataRequest(ApiKeyInput):
     end_date: str
     element_criteria: Dict[str, Any]
     strict: Optional[bool] = True
-
-# ---------- Helper to extend the client for file downloading ----------
-
-def download_file(base_url: str, relative_path: str, save_dir: str = "results/downloaded_files") -> Optional[str]:
-    if not relative_path:
-        return None
-    os.makedirs(save_dir, exist_ok=True)
-    file_url = base_url.rstrip("/") + relative_path
-    filename = os.path.basename(relative_path)
-    save_path = os.path.join(save_dir, filename)
-
-    try:
-        response = requests.get(file_url)
-        if response.status_code == 200:
-            with open(save_path, "wb") as f:
-                f.write(response.content)
-            return save_path
-    except Exception as e:
-        print(f"Failed to download {file_url}: {e}")
-    return None
-
-# ---------- Endpoints ----------
+    include_download: Optional[bool] = True  # allow optional download
+    output_filename: Optional[str] = "filtered_data.csv"
 
 @app.post("/execute/")
 def execute_sql(req: SQLRequest):
@@ -96,27 +77,34 @@ def filter_by_elements(req: ElementFilterRequest):
 
 @app.post("/process/")
 def process_data(req: ProcessDataRequest):
-    base_url = "https://crc1625.mdi.ruhr-uni-bochum.de"
-    client = MatInfWebApiClient(base_url, req.api_key)
-    
+    client = MatInfWebApiClient("https://crc1625.mdi.ruhr-uni-bochum.de", req.api_key)
+
+    temp_folder = f"/tmp/download_{uuid.uuid4()}"
+    os.makedirs(temp_folder, exist_ok=True)
+    output_csv = os.path.join(temp_folder, req.output_filename)
+
+    # Process and optionally save
     df = client.process_data(
         associated_typenames=req.associated_typenames,
         sample_typename=req.sample_typename,
         start_date=req.start_date,
         end_date=req.end_date,
         element_criteria=req.element_criteria,
-        strict=req.strict
+        strict=req.strict,
+        save_location=temp_folder,
+        output_filename=req.output_filename
     )
 
-    # Download linked files
-    df["local_filepath"] = df["linked_objectfilepath"].apply(
-        lambda path: download_file(base_url, path) if path else None
-    )
+    # Download files if requested
+    if req.include_download:
+        client.download_associated_files(df, temp_folder)
 
-    return {
-        "data": df.to_dict(orient="records"),
-        "downloaded_files": df["local_filepath"].dropna().tolist()
-    }
+    # Zip the folder and return as file
+    zip_path = f"{temp_folder}.zip"
+    shutil.make_archive(temp_folder, 'zip', temp_folder)
+    shutil.rmtree(temp_folder)
+
+    return FileResponse(zip_path, filename=os.path.basename(zip_path), media_type="application/zip")
 
 @app.post("/summary/")
 def get_summary(req: SummaryRequest):
