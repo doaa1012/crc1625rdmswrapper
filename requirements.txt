@@ -1,5 +1,13 @@
+<<<<<<< HEAD
 fastapi
 uvicorn
 pandas
 requests
 pydantic
+=======
+fastapi
+uvicorn
+pandas
+requests
+pydantic
+>>>>>>> 963f44b54a618b9af3266c32d16f0fa8e2e5bfc3
