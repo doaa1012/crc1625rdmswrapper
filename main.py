@@ -1,12 +1,12 @@
-from fastapi import FastAPI, Query
+from fastapi import FastAPI
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 from fastapi.responses import JSONResponse
 from MatInfClient import MatInfWebApiClient
 
-app = FastAPI(title="MatInf VRO API Wrapper")
+app = FastAPI(title="CRC1625rdmswrapper")
 
-# Shared model
+# Base model for API key input
 class ApiKeyInput(BaseModel):
     api_key: str
 
@@ -34,6 +34,14 @@ class SummaryRequest(ApiKeyInput):
     include_linked_properties: Optional[bool] = True
     property_names: Optional[List[str]] = []
 
+class ProcessDataRequest(ApiKeyInput):
+    associated_typenames: List[str]
+    sample_typename: str
+    start_date: str
+    end_date: str
+    element_criteria: Dict[str, Any]
+    strict: Optional[bool] = True
+
 @app.post("/execute/")
 def execute_sql(req: SQLRequest):
     client = MatInfWebApiClient("https://crc1625.mdi.ruhr-uni-bochum.de", req.api_key)
@@ -43,7 +51,9 @@ def execute_sql(req: SQLRequest):
 @app.post("/get_filtered_objects/")
 def get_filtered_objects(req: FilteredObjectsRequest):
     client = MatInfWebApiClient("https://crc1625.mdi.ruhr-uni-bochum.de", req.api_key)
-    df, link_map, ids = client.get_filtered_objects(req.associated_typenames, req.sample_typename, req.start_date, req.end_date, req.strict)
+    df, link_map, ids = client.get_filtered_objects(
+        req.associated_typenames, req.sample_typename, req.start_date, req.end_date, req.strict
+    )
     return {
         "data": df.to_dict(orient="records"),
         "link_map": link_map,
@@ -58,6 +68,19 @@ def filter_by_elements(req: ElementFilterRequest):
         "data": df.to_dict(orient="records"),
         "filtered_sample_ids": ids
     }
+
+@app.post("/process/")
+def process_data(req: ProcessDataRequest):
+    client = MatInfWebApiClient("https://crc1625.mdi.ruhr-uni-bochum.de", req.api_key)
+    df = client.process_data(
+        associated_typenames=req.associated_typenames,
+        sample_typename=req.sample_typename,
+        start_date=req.start_date,
+        end_date=req.end_date,
+        element_criteria=req.element_criteria,
+        strict=req.strict
+    )
+    return {"data": df.to_dict(orient="records")}
 
 @app.post("/summary/")
 def get_summary(req: SummaryRequest):
